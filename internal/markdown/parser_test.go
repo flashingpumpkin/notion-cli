@@ -161,3 +161,28 @@ func TestParseHeadings(t *testing.T) {
 		t.Error("Expected to find H3 heading")
 	}
 }
+
+func TestParseCodeBlockWithoutLanguage(t *testing.T) {
+	content := []byte("# Test\n\nCode without language:\n\n```\nsome code\nwithout language\n```")
+
+	doc, err := Parse(content)
+	if err != nil {
+		t.Fatalf("Failed to parse markdown: %v", err)
+	}
+
+	// Check for code block
+	foundCode := false
+	for _, block := range doc.Blocks {
+		if codeBlock, ok := block.(*notionapi.CodeBlock); ok {
+			foundCode = true
+			if codeBlock.Code.Language != "plain text" {
+				t.Errorf("Expected language 'plain text', got '%s'", codeBlock.Code.Language)
+			}
+			break
+		}
+	}
+
+	if !foundCode {
+		t.Error("Expected to find code block")
+	}
+}
