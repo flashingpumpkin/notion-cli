@@ -250,6 +250,11 @@ func convertCodeBlock(node ast.Node, source []byte) notionapi.Block {
 		return nil
 	}
 
+	// Default to "plain text" if no language specified
+	if language == "" {
+		language = "plain text"
+	}
+
 	return &notionapi.CodeBlock{
 		BasicBlock: notionapi.BasicBlock{
 			Object: notionapi.ObjectTypeBlock,
