@@ -214,6 +214,7 @@ func (s *Syncer) findOrCreateDirectoryPage(parentPageID, dirName string) (string
 	}
 
 	// Create new empty page
+	// Use dirName for both title and filename property (for tracking)
 	pageID, err = s.notionClient.CreatePage(parentPageID, dirName, dirName, []notionapi.Block{})
 	if err != nil {
 		return "", false, err
@@ -273,9 +274,9 @@ func (s *Syncer) CleanupOrphanedPages(paths []string) error {
 			if richTextProp, ok := prop.(*notionapi.RichTextProperty); ok {
 				if len(richTextProp.RichText) > 0 {
 					pageFilename := richTextProp.RichText[0].PlainText
-					// If the markdown file/directory doesn't exist, delete the page
+					// If the markdown file or directory doesn't exist, delete the page
 					if !fileSet[pageFilename] {
-						fmt.Printf("⚠ Deleting orphaned page '%s' (no markdown file/dir: %s)\n", getPageTitle(page), pageFilename)
+						fmt.Printf("⚠ Deleting orphaned page '%s' (no markdown file or directory: %s)\n", getPageTitle(page), pageFilename)
 						err = s.notionClient.DeletePage(string(page.ID))
 						if err != nil {
 							fmt.Fprintf(os.Stderr, "Warning: failed to delete page %s: %v\n", page.ID, err)
