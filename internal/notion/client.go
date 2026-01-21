@@ -3,6 +3,7 @@ package notion
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/jomei/notionapi"
 )
@@ -89,10 +90,13 @@ func (c *Client) UpdatePage(pageID, title string, blocks []notionapi.Block) erro
 	}
 
 	// Delete all existing blocks
+	// Note: Deletion is sequential as the Notion API doesn't support batch deletion
 	for _, block := range existingBlocks.Results {
 		_, err = c.api.Block.Delete(ctx, block.GetID())
 		if err != nil {
-			return fmt.Errorf("failed to delete block: %w", err)
+			// Log the error but continue trying to delete other blocks
+			// This ensures partial cleanup even if some blocks fail
+			fmt.Fprintf(os.Stderr, "Warning: failed to delete block %s: %v\n", block.GetID(), err)
 		}
 	}
 

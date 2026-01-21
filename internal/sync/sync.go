@@ -90,7 +90,11 @@ func (s *Syncer) Sync() (string, bool, error) {
 
 // getFileHash returns a hash for the file path to use as a key
 func (s *Syncer) getFileHash(filePath string) string {
-	absPath, _ := filepath.Abs(filePath)
+	absPath, err := filepath.Abs(filePath)
+	if err != nil {
+		// If we can't get absolute path, use the original path
+		absPath = filePath
+	}
 	hash := sha256.Sum256([]byte(absPath))
 	return hex.EncodeToString(hash[:])
 }
