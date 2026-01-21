@@ -33,3 +33,6 @@ go.work.sum
 
 # notion-cli binary
 notion-cli
+
+# Test directories
+test-docs/

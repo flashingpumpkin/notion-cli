@@ -4,9 +4,11 @@ A Golang CLI tool and GitHub Action that syncs Markdown files to Notion pages.
 
 ## Features
 
-- **Sync Markdown to Notion**: Convert and sync markdown files to Notion pages
+- **Sync Individual Files**: Convert and sync single markdown files to Notion pages
+- **Sync Directories**: Recursively sync entire directories of markdown files with nested structure
+- **Index Pages**: Use `index.md` or `README.md` files to populate directory pages in Notion
 - **Smart Updates**: Automatically creates new pages or updates existing ones based on filename
-- **Hierarchical Organization**: Sync pages under a specified root page in Notion
+- **Hierarchical Organization**: Maintains directory structure in Notion page hierarchy
 - **Stateless Operation**: No local files needed - page tracking via Notion page properties
 - **Cleanup Support**: Optionally delete orphaned Notion pages without corresponding markdown files
 - **Rich Formatting**: Supports headings, paragraphs, lists, and code blocks
@@ -34,7 +36,7 @@ Download the latest release from the [releases page](https://github.com/flashing
 3. Share your target root page with your integration
 4. Get the root page ID from the page URL
 
-### Basic Usage
+### Sync a Single File
 
 ```bash
 # Sync a markdown file to Notion
@@ -44,12 +46,40 @@ Download the latest release from the [releases page](https://github.com/flashing
   --root YOUR_ROOT_PAGE_ID
 ```
 
+### Sync a Directory
+
+```bash
+# Sync an entire directory of markdown files
+./notion-cli sync \
+  --file ./docs \
+  --token YOUR_NOTION_TOKEN \
+  --root YOUR_ROOT_PAGE_ID
+```
+
+This will:
+- Create a Notion page for each subdirectory
+- Use `index.md` or `README.md` (case-insensitive) to populate directory pages
+- Sync all `.md` files while maintaining the directory hierarchy
+
+### Directory Structure Example
+
+```
+docs/
+├── README.md           # Populates the root "docs" page
+├── api/
+│   ├── index.md        # Populates the "api" page
+│   ├── users.md        # Creates "users" child page under "api"
+│   └── auth.md         # Creates "auth" child page under "api"
+└── guides/
+    └── getting-started.md  # Creates "getting-started" page under "guides"
+```
+
 ### Cleanup Orphaned Pages
 
 ```bash
 # Sync and delete Notion pages without corresponding markdown files
 ./notion-cli sync \
-  --file ./my-document.md \
+  --file ./docs \
   --token YOUR_NOTION_TOKEN \
   --root YOUR_ROOT_PAGE_ID \
   --cleanup
@@ -63,20 +93,20 @@ You can set the Notion token via environment variable:
 export NOTION_TOKEN=YOUR_NOTION_TOKEN
 
 ./notion-cli sync \
-  --file ./my-document.md \
+  --file ./docs \
   --root YOUR_ROOT_PAGE_ID
 ```
 
 ### Command Options
 
-- `--file, -f`: Path to the markdown file to sync (required)
+- `--file, -f`: Path to the markdown file or directory to sync (required)
 - `--token, -t`: Notion API token (required, can use `NOTION_TOKEN` env var)
 - `--root, -r`: Root page ID under which to sync the markdown page (required)
 - `--cleanup, -c`: Delete Notion pages that don't have corresponding markdown files (optional)
 
 ## How It Works
 
-### First Sync (Create)
+### Syncing a Single File
 
 When you sync a markdown file for the first time:
 1. The CLI parses your markdown file
@@ -90,9 +120,7 @@ Example output:
 ✓ Created new Notion page: abc123-def456-ghi789
 ```
 
-### Subsequent Syncs (Update)
-
-When you sync the same markdown file again:
+When you sync the same file again:
 1. The CLI looks for an existing page with the matching filename
 2. Updates the existing Notion page with the new content
 3. Preserves the page hierarchy
@@ -102,11 +130,41 @@ Example output:
 ✓ Updated existing Notion page: abc123-def456-ghi789
 ```
 
+### Syncing a Directory
+
+When you sync a directory:
+1. The CLI recursively walks through all subdirectories
+2. For each directory, it checks for `index.md` or `README.md` (case-insensitive)
+3. If found, uses that file's content to populate the directory's Notion page
+4. If not found, creates an empty page for the directory
+5. Syncs all other `.md` files as child pages
+6. Maintains the full directory hierarchy in Notion
+
+Example output:
+```
+Syncing directory 'docs' using index file 'README.md'
+Syncing file: introduction.md
+  ✓ Created
+Syncing directory 'api' using index file 'index.md'
+Syncing file: users.md
+  ✓ Created
+Syncing file: auth.md
+  ✓ Updated
+✓ Directory sync completed
+```
+
+### Index/README Files
+
+- **Purpose**: Populate the content of directory pages in Notion
+- **File names** (case-insensitive): `index.md`, `INDEX.md`, `readme.md`, `README.md`, etc.
+- **Behavior**: The first matching file found is used as the directory's page content
+- **Note**: Index/README files are not created as separate child pages
+
 ### Cleanup Mode
 
 When using the `--cleanup` flag:
-1. After syncing your file, the tool checks all child pages under the root
-2. Pages with a "Markdown File" property that don't have a corresponding markdown file are deleted
+1. After syncing, the tool checks all child pages under the root
+2. Pages with a "Markdown File" property that don't have a corresponding markdown file or directory are deleted
 3. This keeps your Notion workspace in sync with your markdown files
 
 Example output:

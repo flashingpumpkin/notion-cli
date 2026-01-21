@@ -16,12 +16,12 @@ func main() {
 		Commands: []*cli.Command{
 			{
 				Name:  "sync",
-				Usage: "Sync a markdown file to Notion",
+				Usage: "Sync a markdown file or directory to Notion",
 				Flags: []cli.Flag{
 					&cli.StringFlag{
 						Name:     "file",
 						Aliases:  []string{"f"},
-						Usage:    "Path to the markdown file to sync",
+						Usage:    "Path to the markdown file or directory to sync",
 						Required: true,
 					},
 					&cli.StringFlag{
@@ -61,14 +61,20 @@ func main() {
 						return fmt.Errorf("sync failed: %w", err)
 					}
 
-					if created {
-						fmt.Printf("✓ Created new Notion page: %s\n", pageID)
+					// Only print page ID for single file sync
+					if pageID != "" {
+						if created {
+							fmt.Printf("✓ Created new Notion page: %s\n", pageID)
+						} else {
+							fmt.Printf("✓ Updated existing Notion page: %s\n", pageID)
+						}
 					} else {
-						fmt.Printf("✓ Updated existing Notion page: %s\n", pageID)
+						fmt.Println("✓ Directory sync completed")
 					}
 
 					// If cleanup flag is set, clean up orphaned pages
 					if c.Bool("cleanup") {
+						fmt.Println("\nCleaning up orphaned pages...")
 						err = syncer.CleanupOrphanedPages([]string{c.String("file")})
 						if err != nil {
 							return fmt.Errorf("cleanup failed: %w", err)
