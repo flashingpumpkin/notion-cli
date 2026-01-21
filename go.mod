@@ -7,6 +7,7 @@ toolchain go1.25.6
 require (
 	github.com/jomei/notionapi v1.13.3
 	github.com/urfave/cli/v2 v2.27.7
+	github.com/urfave/cli/v3 v3.6.2
 	github.com/yuin/goldmark v1.7.16
 )
 
