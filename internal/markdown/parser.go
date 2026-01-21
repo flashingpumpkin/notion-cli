@@ -769,22 +769,21 @@ func convertTable(node *east.Table, source []byte) notionapi.Block {
 	for c := node.FirstChild(); c != nil; c = c.NextSibling() {
 		switch row := c.(type) {
 		case *east.TableHeader:
-			for hc := row.FirstChild(); hc != nil; hc = hc.NextSibling() {
-				if tableRow, ok := hc.(*east.TableRow); ok {
-					cells := extractTableCells(tableRow, source)
-					if columnCount == 0 {
-						columnCount = len(cells)
-					}
-					rows = append(rows, &notionapi.TableRowBlock{
-						BasicBlock: notionapi.BasicBlock{
-							Object: notionapi.ObjectTypeBlock,
-							Type:   notionapi.BlockTypeTableRowBlock,
-						},
-						TableRow: notionapi.TableRow{
-							Cells: cells,
-						},
-					})
-				}
+			// TableHeader contains TableCell directly (not wrapped in TableRow)
+			cells := extractTableHeaderCells(row, source)
+			if columnCount == 0 {
+				columnCount = len(cells)
+			}
+			if len(cells) > 0 {
+				rows = append(rows, &notionapi.TableRowBlock{
+					BasicBlock: notionapi.BasicBlock{
+						Object: notionapi.ObjectTypeBlock,
+						Type:   notionapi.BlockTypeTableRowBlock,
+					},
+					TableRow: notionapi.TableRow{
+						Cells: cells,
+					},
+				})
 			}
 		case *east.TableRow:
 			cells := extractTableCells(row, source)
@@ -819,6 +818,26 @@ func convertTable(node *east.Table, source []byte) notionapi.Block {
 			Children:        rows,
 		},
 	}
+}
+
+// extractTableHeaderCells extracts cells directly from a TableHeader node
+func extractTableHeaderCells(header *east.TableHeader, source []byte) [][]notionapi.RichText {
+	var cells [][]notionapi.RichText
+
+	for c := header.FirstChild(); c != nil; c = c.NextSibling() {
+		if cell, ok := c.(*east.TableCell); ok {
+			richText := extractRichText(cell, source)
+			if len(richText) == 0 {
+				richText = []notionapi.RichText{{
+					Type: notionapi.ObjectTypeText,
+					Text: &notionapi.Text{Content: ""},
+				}}
+			}
+			cells = append(cells, richText)
+		}
+	}
+
+	return cells
 }
 
 // extractTableCells extracts cells from a table row

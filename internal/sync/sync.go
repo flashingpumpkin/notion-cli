@@ -20,6 +20,7 @@ type Config struct {
 	FilePath    string
 	NotionToken string
 	RootPageID  string // This is now a database ID
+	Force       bool   // Force update even if content hash matches
 }
 
 // Syncer handles syncing markdown files to Notion
@@ -319,11 +320,13 @@ func (s *Syncer) syncFileWithProgress(filePath, databaseID, customIdentifier str
 	}
 
 	if exists {
-		// Check if content has changed
-		existingHash, err := s.notionClient.GetEntryContentHash(pageID)
-		if err == nil && existingHash == contentHash {
-			// Content unchanged, skip update
-			return pageID, false, true, nil
+		// Check if content has changed (unless force is set)
+		if !s.config.Force {
+			existingHash, err := s.notionClient.GetEntryContentHash(pageID)
+			if err == nil && existingHash == contentHash {
+				// Content unchanged, skip update
+				return pageID, false, true, nil
+			}
 		}
 
 		// Register file for progress tracking
@@ -490,11 +493,13 @@ func (s *Syncer) syncFile(filePath, databaseID, customIdentifier string, linkMap
 	}
 
 	if exists {
-		// Check if content has changed
-		existingHash, err := s.notionClient.GetEntryContentHash(pageID)
-		if err == nil && existingHash == contentHash {
-			// Content unchanged, skip update
-			return pageID, false, true, nil
+		// Check if content has changed (unless force is set)
+		if !s.config.Force {
+			existingHash, err := s.notionClient.GetEntryContentHash(pageID)
+			if err == nil && existingHash == contentHash {
+				// Content unchanged, skip update
+				return pageID, false, true, nil
+			}
 		}
 
 		// Update existing entry

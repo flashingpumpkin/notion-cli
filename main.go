@@ -46,12 +46,18 @@ func main() {
 						Usage:   "Delete database entries without corresponding markdown files (directory sync only)",
 						Value:   false,
 					},
+					&cli.BoolFlag{
+						Name:  "force",
+						Usage: "Force update even if content hash matches",
+						Value: false,
+					},
 				},
 				Action: func(c *cli.Context) error {
 					config := sync.Config{
 						FilePath:    c.String("file"),
 						NotionToken: c.String("token"),
 						RootPageID:  c.String("root"),
+						Force:       c.Bool("force"),
 					}
 
 					syncer, err := sync.NewSyncer(config)
