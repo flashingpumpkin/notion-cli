@@ -25,56 +25,38 @@ func Parse(content []byte) (*Document, error) {
 	var title string
 	var blocks []notionapi.Block
 
-	// Extract title (first heading) and convert to Notion blocks
-	err := ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
-		if !entering {
-			return ast.WalkContinue, nil
-		}
-
-		switch node := n.(type) {
+	// Walk only direct children of the document
+	for child := doc.FirstChild(); child != nil; child = child.NextSibling() {
+		switch node := child.(type) {
 		case *ast.Heading:
 			if title == "" && node.Level == 1 {
 				// Extract title from first H1
 				title = extractText(node, content)
-				return ast.WalkSkipChildren, nil
+			} else {
+				// Convert other headings to blocks
+				block := convertHeading(node, content)
+				if block != nil {
+					blocks = append(blocks, block)
+				}
 			}
-			// Convert other headings to blocks
-			block := convertHeading(node, content)
-			if block != nil {
-				blocks = append(blocks, block)
-			}
-			return ast.WalkSkipChildren, nil
 
 		case *ast.Paragraph:
-			// Skip if this is part of a heading
-			if _, ok := n.Parent().(*ast.Heading); ok {
-				return ast.WalkContinue, nil
-			}
 			block := convertParagraph(node, content)
 			if block != nil {
 				blocks = append(blocks, block)
 			}
-			return ast.WalkSkipChildren, nil
 
 		case *ast.List:
 			// Convert lists
 			listBlocks := convertList(node, content)
 			blocks = append(blocks, listBlocks...)
-			return ast.WalkSkipChildren, nil
 
 		case *ast.FencedCodeBlock, *ast.CodeBlock:
 			block := convertCodeBlock(node, content)
 			if block != nil {
 				blocks = append(blocks, block)
 			}
-			return ast.WalkSkipChildren, nil
 		}
-
-		return ast.WalkContinue, nil
-	})
-
-	if err != nil {
-		return nil, err
 	}
 
 	// Default title if none found
@@ -88,15 +70,30 @@ func Parse(content []byte) (*Document, error) {
 	}, nil
 }
 
-// extractText extracts text content from a node
+// extractText extracts text content from a node recursively
 func extractText(node ast.Node, source []byte) string {
 	var buf bytes.Buffer
-	for c := node.FirstChild(); c != nil; c = c.NextSibling() {
-		if text, ok := c.(*ast.Text); ok {
-			buf.Write(text.Segment.Value(source))
+	
+	err := ast.Walk(node, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
+			return ast.WalkContinue, nil
 		}
+		
+		if text, ok := n.(*ast.Text); ok {
+			buf.Write(text.Segment.Value(source))
+			if text.SoftLineBreak() {
+				buf.WriteByte(' ')
+			}
+		}
+		
+		return ast.WalkContinue, nil
+	})
+	
+	if err != nil {
+		return ""
 	}
-	return buf.String()
+	
+	return strings.TrimSpace(buf.String())
 }
 
 // convertHeading converts a markdown heading to a Notion block
