@@ -118,12 +118,18 @@ func (s *Syncer) CleanupOrphanedPages(markdownFiles []string) error {
 
 // getPageTitle extracts the title from a page
 func getPageTitle(page notionapi.Page) string {
-	if prop, ok := page.Properties["title"]; ok {
-		if titleProp, ok := prop.(*notionapi.TitleProperty); ok {
-			if len(titleProp.Title) > 0 {
-				return titleProp.Title[0].PlainText
+	// Try different common title property names
+	titleProps := []string{"title", "Title", "Name", "name"}
+	
+	for _, propName := range titleProps {
+		if prop, ok := page.Properties[propName]; ok {
+			if titleProp, ok := prop.(*notionapi.TitleProperty); ok {
+				if len(titleProp.Title) > 0 {
+					return titleProp.Title[0].PlainText
+				}
 			}
 		}
 	}
+	
 	return "Untitled"
 }
