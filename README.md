@@ -208,7 +208,97 @@ func main() {
 
 ## GitHub Action
 
-You can use this tool in GitHub Actions to automatically sync markdown files to Notion:
+You can use this as a GitHub Action to automatically sync markdown files to Notion in your CI/CD pipeline:
+
+### Quick Start
+
+```yaml
+name: Sync to Notion
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '**.md'
+      - 'docs/**'
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Sync to Notion
+        uses: flashingpumpkin/notion-cli@main
+        with:
+          file: ./docs
+          notion-token: ${{ secrets.NOTION_TOKEN }}
+          root-page-id: ${{ secrets.NOTION_ROOT_PAGE_ID }}
+          cleanup: true
+```
+
+### Action Inputs
+
+| Input | Description | Required | Default |
+|-------|-------------|----------|---------|
+| `file` | Path to the markdown file or directory to sync | Yes | - |
+| `notion-token` | Notion API token | Yes | - |
+| `root-page-id` | Root page ID under which to sync | Yes | - |
+| `cleanup` | Delete orphaned Notion pages | No | `false` |
+
+### Examples
+
+#### Sync a single file
+
+```yaml
+- name: Sync README
+  uses: flashingpumpkin/notion-cli@main
+  with:
+    file: ./README.md
+    notion-token: ${{ secrets.NOTION_TOKEN }}
+    root-page-id: ${{ secrets.NOTION_ROOT_PAGE_ID }}
+```
+
+#### Sync a directory with cleanup
+
+```yaml
+- name: Sync docs directory
+  uses: flashingpumpkin/notion-cli@main
+  with:
+    file: ./docs
+    notion-token: ${{ secrets.NOTION_TOKEN }}
+    root-page-id: ${{ secrets.NOTION_ROOT_PAGE_ID }}
+    cleanup: true
+```
+
+#### Multiple syncs in one workflow
+
+```yaml
+- name: Sync API docs
+  uses: flashingpumpkin/notion-cli@main
+  with:
+    file: ./docs/api
+    notion-token: ${{ secrets.NOTION_TOKEN }}
+    root-page-id: ${{ secrets.NOTION_API_DOCS_PAGE_ID }}
+
+- name: Sync Guides
+  uses: flashingpumpkin/notion-cli@main
+  with:
+    file: ./docs/guides
+    notion-token: ${{ secrets.NOTION_TOKEN }}
+    root-page-id: ${{ secrets.NOTION_GUIDES_PAGE_ID }}
+```
+
+### Setting up Secrets
+
+1. Go to your repository settings → Secrets and variables → Actions
+2. Add the following secrets:
+   - `NOTION_TOKEN`: Your Notion integration token
+   - `NOTION_ROOT_PAGE_ID`: The ID of your root page in Notion
+
+### Using CLI directly (alternative)
+
+If you prefer to use the CLI binary directly:
 
 ```yaml
 name: Sync to Notion
@@ -223,27 +313,22 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       
-      - name: Setup Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: '1.21'
-      
-      - name: Install notion-cli
+      - name: Download notion-cli
         run: |
-          git clone https://github.com/flashingpumpkin/notion-cli.git
-          cd notion-cli
-          go build -o notion-cli .
-          sudo mv notion-cli /usr/local/bin/
+          # Download the latest release for your platform
+          curl -L https://github.com/flashingpumpkin/notion-cli/releases/latest/download/notion-cli-linux-amd64 -o notion-cli
+          chmod +x notion-cli
       
       - name: Sync to Notion
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
         run: |
-          notion-cli sync \
-            --file ./README.md \
-            --root ${{ secrets.NOTION_ROOT_PAGE_ID }}
+          ./notion-cli sync \
+            --file ./docs \
+            --root ${{ secrets.NOTION_ROOT_PAGE_ID }} \
+            --cleanup
 ```
 
 ## How Pages Are Tracked

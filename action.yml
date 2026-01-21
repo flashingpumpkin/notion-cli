@@ -1,0 +1,61 @@
+name: 'Notion Sync'
+description: 'Sync Markdown files to Notion pages'
+author: 'flashingpumpkin'
+
+branding:
+  icon: 'upload-cloud'
+  color: 'gray-dark'
+
+inputs:
+  file:
+    description: 'Path to the markdown file or directory to sync'
+    required: true
+  notion-token:
+    description: 'Notion API token'
+    required: true
+  root-page-id:
+    description: 'Root page ID under which to sync the markdown page'
+    required: true
+  cleanup:
+    description: 'Delete Notion pages that do not have corresponding markdown files'
+    required: false
+    default: 'false'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21'
+    
+    - name: Cache Go modules
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+    
+    - name: Build notion-cli
+      shell: bash
+      run: |
+        cd ${{ github.action_path }}
+        go build -o notion-cli .
+    
+    - name: Sync to Notion
+      shell: bash
+      env:
+        NOTION_TOKEN: ${{ inputs.notion-token }}
+      run: |
+        CLEANUP_FLAG=""
+        if [ "${{ inputs.cleanup }}" = "true" ]; then
+          CLEANUP_FLAG="--cleanup"
+        fi
+        
+        ${{ github.action_path }}/notion-cli sync \
+          --file "${{ inputs.file }}" \
+          --root "${{ inputs.root-page-id }}" \
+          ${CLEANUP_FLAG}
