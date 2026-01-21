@@ -9,10 +9,13 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
+var version = "dev"
+
 func main() {
 	app := &cli.App{
-		Name:  "notion-cli",
-		Usage: "Sync Markdown files to Notion pages",
+		Name:    "notion-cli",
+		Usage:   "Sync Markdown files to Notion pages",
+		Version: version,
 		Commands: []*cli.Command{
 			{
 				Name:  "sync",
@@ -34,13 +37,13 @@ func main() {
 					&cli.StringFlag{
 						Name:     "root",
 						Aliases:  []string{"r"},
-						Usage:    "Root page ID under which to sync the markdown page",
+						Usage:    "Notion page ID (for single file) or database ID (for directory) to sync into",
 						Required: true,
 					},
 					&cli.BoolFlag{
 						Name:    "cleanup",
 						Aliases: []string{"c"},
-						Usage:   "Delete Notion pages that don't have corresponding markdown files",
+						Usage:   "Delete database entries without corresponding markdown files (directory sync only)",
 						Value:   false,
 					},
 				},

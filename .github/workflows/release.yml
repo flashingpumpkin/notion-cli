@@ -34,11 +34,12 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
           OUTPUT_NAME=notion-cli-${{ matrix.goos }}-${{ matrix.goarch }}
           if [ "${{ matrix.goos }}" = "windows" ]; then
             OUTPUT_NAME="${OUTPUT_NAME}.exe"
           fi
-          go build -o "${OUTPUT_NAME}" .
+          go build -ldflags "-X main.version=${VERSION}" -o "${OUTPUT_NAME}" .
           
       - name: Upload artifact
         uses: actions/upload-artifact@v6
