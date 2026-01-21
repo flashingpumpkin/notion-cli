@@ -1,15 +1,13 @@
 package sync
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/flashingpumpkin/notion-cli/internal/markdown"
 	"github.com/flashingpumpkin/notion-cli/internal/notion"
+	"github.com/jomei/notionapi"
 )
 
 // Config holds the configuration for syncing
@@ -17,14 +15,12 @@ type Config struct {
 	FilePath    string
 	NotionToken string
 	RootPageID  string
-	DatabaseID  string
 }
 
 // Syncer handles syncing markdown files to Notion
 type Syncer struct {
 	config       Config
 	notionClient *notion.Client
-	mappingFile  string
 }
 
 // NewSyncer creates a new Syncer instance
@@ -34,14 +30,9 @@ func NewSyncer(config Config) (*Syncer, error) {
 		return nil, fmt.Errorf("failed to create notion client: %w", err)
 	}
 
-	// Create mapping file path in the same directory as the markdown file
-	dir := filepath.Dir(config.FilePath)
-	mappingFile := filepath.Join(dir, ".notion-sync-mappings.json")
-
 	return &Syncer{
 		config:       config,
 		notionClient: client,
-		mappingFile:  mappingFile,
 	}, nil
 }
 
@@ -60,13 +51,18 @@ func (s *Syncer) Sync() (string, bool, error) {
 		return "", false, fmt.Errorf("failed to parse markdown: %w", err)
 	}
 
-	// Check if this file already has a mapping to a Notion page
-	fileHash := s.getFileHash(s.config.FilePath)
-	pageID, exists := s.getPageMapping(fileHash)
+	// Get the filename (not the full path)
+	filename := filepath.Base(s.config.FilePath)
+
+	// Look up if a child page exists with this filename
+	pageID, exists, err := s.notionClient.FindPageByFilename(s.config.RootPageID, filename)
+	if err != nil {
+		return "", false, fmt.Errorf("failed to lookup page by filename: %w", err)
+	}
 
 	if exists {
 		// Update existing page
-		err = s.notionClient.UpdatePage(pageID, doc.Title, doc.Blocks)
+		err = s.notionClient.UpdatePage(pageID, doc.Title, filename, doc.Blocks)
 		if err != nil {
 			return "", false, fmt.Errorf("failed to update page: %w", err)
 		}
@@ -74,79 +70,60 @@ func (s *Syncer) Sync() (string, bool, error) {
 	}
 
 	// Create new page
-	pageID, err = s.notionClient.CreatePage(s.config.RootPageID, doc.Title, doc.Blocks)
+	pageID, err = s.notionClient.CreatePage(s.config.RootPageID, doc.Title, filename, doc.Blocks)
 	if err != nil {
 		return "", false, fmt.Errorf("failed to create page: %w", err)
-	}
-
-	// Save the mapping
-	err = s.savePageMapping(fileHash, pageID)
-	if err != nil {
-		return "", false, fmt.Errorf("failed to save mapping: %w", err)
 	}
 
 	return pageID, true, nil
 }
 
-// getFileHash returns a hash for the file path to use as a key
-func (s *Syncer) getFileHash(filePath string) string {
-	absPath, err := filepath.Abs(filePath)
+// CleanupOrphanedPages deletes Notion pages that don't have corresponding markdown files
+func (s *Syncer) CleanupOrphanedPages(markdownFiles []string) error {
+	// Get all child pages from the root
+	pages, err := s.notionClient.GetChildPages(s.config.RootPageID)
 	if err != nil {
-		// If we can't get absolute path, use the original path
-		absPath = filePath
-	}
-	hash := sha256.Sum256([]byte(absPath))
-	return hex.EncodeToString(hash[:])
-}
-
-// getPageMapping retrieves the Notion page ID for a given file hash
-func (s *Syncer) getPageMapping(fileHash string) (string, bool) {
-	mappings, err := s.loadMappings()
-	if err != nil {
-		return "", false
+		return fmt.Errorf("failed to get child pages: %w", err)
 	}
 
-	pageID, exists := mappings[fileHash]
-	return pageID, exists
-}
-
-// savePageMapping saves the mapping between file hash and Notion page ID
-func (s *Syncer) savePageMapping(fileHash, pageID string) error {
-	mappings, _ := s.loadMappings()
-	if mappings == nil {
-		mappings = make(map[string]string)
+	// Build a map of markdown filenames for quick lookup
+	markdownFileSet := make(map[string]bool)
+	for _, file := range markdownFiles {
+		filename := filepath.Base(file)
+		markdownFileSet[filename] = true
 	}
 
-	mappings[fileHash] = pageID
-
-	data, err := json.MarshalIndent(mappings, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal mappings: %w", err)
-	}
-
-	err = os.WriteFile(s.mappingFile, data, 0644)
-	if err != nil {
-		return fmt.Errorf("failed to write mappings file: %w", err)
+	// Check each page
+	for _, page := range pages {
+		// Get the "Markdown File" property
+		if prop, ok := page.Properties["Markdown File"]; ok {
+			if richTextProp, ok := prop.(*notionapi.RichTextProperty); ok {
+				if len(richTextProp.RichText) > 0 {
+					pageFilename := richTextProp.RichText[0].PlainText
+					// If the markdown file doesn't exist, delete the page
+					if !markdownFileSet[pageFilename] {
+						fmt.Printf("⚠ Deleting orphaned page '%s' (no markdown file: %s)\n", getPageTitle(page), pageFilename)
+						err = s.notionClient.DeletePage(string(page.ID))
+						if err != nil {
+							fmt.Fprintf(os.Stderr, "Warning: failed to delete page %s: %v\n", page.ID, err)
+						}
+					}
+				}
+			}
+		}
 	}
 
 	return nil
 }
 
-// loadMappings loads the mappings from file
-func (s *Syncer) loadMappings() (map[string]string, error) {
-	data, err := os.ReadFile(s.mappingFile)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return make(map[string]string), nil
+// getPageTitle extracts the title from a page
+func getPageTitle(page notionapi.Page) string {
+	if prop, ok := page.Properties["title"]; ok {
+		if titleProp, ok := prop.(*notionapi.TitleProperty); ok {
+			if len(titleProp.Title) > 0 {
+				return titleProp.Title[0].PlainText
+			}
 		}
-		return nil, err
 	}
-
-	var mappings map[string]string
-	err = json.Unmarshal(data, &mappings)
-	if err != nil {
-		return nil, err
-	}
-
-	return mappings, nil
+	return "Untitled"
 }

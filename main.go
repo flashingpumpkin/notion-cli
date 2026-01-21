@@ -37,18 +37,18 @@ func main() {
 						Usage:    "Root page ID under which to sync the markdown page",
 						Required: true,
 					},
-					&cli.StringFlag{
-						Name:    "database",
-						Aliases: []string{"d"},
-						Usage:   "Database ID to store page mappings (optional, uses file-based mapping if not provided)",
+					&cli.BoolFlag{
+						Name:    "cleanup",
+						Aliases: []string{"c"},
+						Usage:   "Delete Notion pages that don't have corresponding markdown files",
+						Value:   false,
 					},
 				},
 				Action: func(c *cli.Context) error {
 					config := sync.Config{
-						FilePath:   c.String("file"),
+						FilePath:    c.String("file"),
 						NotionToken: c.String("token"),
-						RootPageID: c.String("root"),
-						DatabaseID: c.String("database"),
+						RootPageID:  c.String("root"),
 					}
 
 					syncer, err := sync.NewSyncer(config)
@@ -65,6 +65,14 @@ func main() {
 						fmt.Printf("✓ Created new Notion page: %s\n", pageID)
 					} else {
 						fmt.Printf("✓ Updated existing Notion page: %s\n", pageID)
+					}
+
+					// If cleanup flag is set, clean up orphaned pages
+					if c.Bool("cleanup") {
+						err = syncer.CleanupOrphanedPages([]string{c.String("file")})
+						if err != nil {
+							return fmt.Errorf("cleanup failed: %w", err)
+						}
 					}
 
 					return nil

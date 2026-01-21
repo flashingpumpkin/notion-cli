@@ -5,9 +5,10 @@ A Golang CLI tool and GitHub Action that syncs Markdown files to Notion pages.
 ## Features
 
 - **Sync Markdown to Notion**: Convert and sync markdown files to Notion pages
-- **Smart Updates**: Automatically creates new pages or updates existing ones
+- **Smart Updates**: Automatically creates new pages or updates existing ones based on filename
 - **Hierarchical Organization**: Sync pages under a specified root page in Notion
-- **Persistent Mappings**: Tracks file-to-page relationships to enable updates
+- **Stateless Operation**: No local files needed - page tracking via Notion page properties
+- **Cleanup Support**: Optionally delete orphaned Notion pages without corresponding markdown files
 - **Rich Formatting**: Supports headings, paragraphs, lists, and code blocks
 
 ## Installation
@@ -43,6 +44,17 @@ Download the latest release from the [releases page](https://github.com/flashing
   --root YOUR_ROOT_PAGE_ID
 ```
 
+### Cleanup Orphaned Pages
+
+```bash
+# Sync and delete Notion pages without corresponding markdown files
+./notion-cli sync \
+  --file ./my-document.md \
+  --token YOUR_NOTION_TOKEN \
+  --root YOUR_ROOT_PAGE_ID \
+  --cleanup
+```
+
 ### Using Environment Variables
 
 You can set the Notion token via environment variable:
@@ -60,7 +72,7 @@ export NOTION_TOKEN=YOUR_NOTION_TOKEN
 - `--file, -f`: Path to the markdown file to sync (required)
 - `--token, -t`: Notion API token (required, can use `NOTION_TOKEN` env var)
 - `--root, -r`: Root page ID under which to sync the markdown page (required)
-- `--database, -d`: Database ID to store page mappings (optional, defaults to file-based mapping)
+- `--cleanup, -c`: Delete Notion pages that don't have corresponding markdown files (optional)
 
 ## How It Works
 
@@ -68,9 +80,10 @@ export NOTION_TOKEN=YOUR_NOTION_TOKEN
 
 When you sync a markdown file for the first time:
 1. The CLI parses your markdown file
-2. Creates a new Notion page under the specified root page
-3. Stores the mapping in `.notion-sync-mappings.json` in the same directory as your markdown file
-4. Returns the new page ID
+2. Looks for an existing page with the same filename under the root page
+3. If not found, creates a new Notion page under the specified root page
+4. Stores the filename in a "Markdown File" property on the page
+5. Returns the new page ID
 
 Example output:
 ```
@@ -80,13 +93,26 @@ Example output:
 ### Subsequent Syncs (Update)
 
 When you sync the same markdown file again:
-1. The CLI reads the mapping from `.notion-sync-mappings.json`
+1. The CLI looks for an existing page with the matching filename
 2. Updates the existing Notion page with the new content
 3. Preserves the page hierarchy
 
 Example output:
 ```
 ✓ Updated existing Notion page: abc123-def456-ghi789
+```
+
+### Cleanup Mode
+
+When using the `--cleanup` flag:
+1. After syncing your file, the tool checks all child pages under the root
+2. Pages with a "Markdown File" property that don't have a corresponding markdown file are deleted
+3. This keeps your Notion workspace in sync with your markdown files
+
+Example output:
+```
+✓ Updated existing Notion page: abc123-def456-ghi789
+⚠ Deleting orphaned page 'Old Document' (no markdown file: old.md)
 ```
 
 ## Supported Markdown Features
@@ -162,19 +188,19 @@ jobs:
             --root ${{ secrets.NOTION_ROOT_PAGE_ID }}
 ```
 
-## File Mapping
+## How Pages Are Tracked
 
-The CLI maintains a mapping file (`.notion-sync-mappings.json`) to track which markdown files correspond to which Notion pages. This file is created in the same directory as your markdown file.
+The CLI uses a **stateless approach** - no local mapping files are needed. Instead:
 
-Example mapping file:
-```json
-{
-  "abc123...": "notion-page-id-1",
-  "def456...": "notion-page-id-2"
-}
-```
+1. Each Notion page has a "Markdown File" property that stores the filename (e.g., `README.md`)
+2. When syncing, the tool looks for existing pages with matching filenames
+3. This allows the sync to work from any machine without needing to store state locally
 
-**Note**: Commit this file to your repository if you want to preserve mappings across different environments.
+This means:
+- ✅ No `.notion-sync-mappings.json` file to commit
+- ✅ Sync works from any environment
+- ✅ Easy to understand which markdown file corresponds to which Notion page
+- ✅ Supports cleanup of orphaned pages
 
 ## License
 

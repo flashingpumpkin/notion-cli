@@ -33,6 +33,3 @@ go.work.sum
 
 # notion-cli binary
 notion-cli
-
-# Notion sync mappings
-.notion-sync-mappings.json
