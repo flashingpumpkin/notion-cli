@@ -51,6 +51,17 @@ func main() {
 						Usage: "Force update even if content hash matches",
 						Value: false,
 					},
+					&cli.IntFlag{
+						Name:    "concurrency",
+						Aliases: []string{"j"},
+						Usage:   "Number of parallel file syncs",
+						Value:   15,
+					},
+					&cli.BoolFlag{
+						Name:  "debug",
+						Usage: "Enable debug logging",
+						Value: false,
+					},
 				},
 				Action: func(c *cli.Context) error {
 					config := sync.Config{
@@ -58,6 +69,8 @@ func main() {
 						NotionToken: c.String("token"),
 						RootPageID:  c.String("root"),
 						Force:       c.Bool("force"),
+						Concurrency: c.Int("concurrency"),
+						Debug:       c.Bool("debug"),
 					}
 
 					syncer, err := sync.NewSyncer(config)

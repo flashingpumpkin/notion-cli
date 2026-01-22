@@ -13,7 +13,7 @@ import (
 	"github.com/jomei/notionapi"
 )
 
-const maxParallelSyncs = 15
+const defaultConcurrency = 15
 
 // Config holds the configuration for syncing
 type Config struct {
@@ -21,6 +21,23 @@ type Config struct {
 	NotionToken string
 	RootPageID  string // This is now a database ID
 	Force       bool   // Force update even if content hash matches
+	Concurrency int    // Number of parallel file syncs (default 15)
+	Debug       bool   // Enable debug logging
+}
+
+// getConcurrency returns the configured concurrency or the default
+func (c Config) getConcurrency() int {
+	if c.Concurrency <= 0 {
+		return defaultConcurrency
+	}
+	return c.Concurrency
+}
+
+// debugf prints debug output if debug mode is enabled
+func (s *Syncer) debugf(format string, args ...interface{}) {
+	if s.config.Debug {
+		fmt.Printf("[DEBUG] "+format+"\n", args...)
+	}
 }
 
 // Syncer handles syncing markdown files to Notion
@@ -45,17 +62,23 @@ func NewSyncer(config Config) (*Syncer, error) {
 // Sync syncs the markdown file to Notion
 // Returns: pageID, wasCreated, error
 func (s *Syncer) Sync() (string, bool, error) {
+	s.debugf("Starting sync for path: %s", s.config.FilePath)
+	s.debugf("Concurrency: %d, Force: %v", s.config.getConcurrency(), s.config.Force)
+
 	// Check if the path is a directory or file
 	info, err := os.Stat(s.config.FilePath)
 	if err != nil {
 		return "", false, fmt.Errorf("failed to access path: %w", err)
 	}
+	s.debugf("Path is directory: %v", info.IsDir())
 
 	// Check if root is a page or database
+	s.debugf("Checking if root ID is page or database: %s", s.config.RootPageID)
 	isPage, err := s.notionClient.IsPage(s.config.RootPageID)
 	if err != nil {
 		return "", false, fmt.Errorf("failed to validate root ID: %w", err)
 	}
+	s.debugf("Root is page: %v", isPage)
 
 	if info.IsDir() {
 		// Directory sync requires a database as root
@@ -127,11 +150,13 @@ func (s *Syncer) SyncDirectory(dirPath string) error {
 	// Build link map from existing pages BEFORE syncing
 	// This allows links to resolve during initial sync (no second pass needed)
 	fmt.Println("Building link map from existing pages...")
+	s.debugf("Building link map for database: %s", s.config.RootPageID)
 	linkMap, err := s.buildLinkMapForDatabase(s.config.RootPageID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: couldn't build link map, links won't resolve: %v\n", err)
 		linkMap = make(map[string]string)
 	}
+	s.debugf("Link map built with %d entries", len(linkMap))
 
 	// Create progress manager
 	progress := NewProgressManager()
@@ -253,52 +278,73 @@ func (s *Syncer) syncDirectoryRecursive(currentPath, databaseID, basePath string
 
 // syncFilesParallel syncs files in parallel with interactive progress display
 func (s *Syncer) syncFilesParallel(files []string, databaseID string, linkMap map[string]string, progress *ProgressManager) {
-	sem := make(chan struct{}, maxParallelSyncs)
+	concurrency := s.config.getConcurrency()
+	s.debugf("Starting parallel sync of %d files with concurrency %d", len(files), concurrency)
+	sem := make(chan struct{}, concurrency)
 	var wg gosync.WaitGroup
 
-	for _, filePath := range files {
+	for i, filePath := range files {
 		wg.Add(1)
+		s.debugf("[%d/%d] Waiting for semaphore: %s", i+1, len(files), filepath.Base(filePath))
 		sem <- struct{}{}
+		s.debugf("[%d/%d] Acquired semaphore: %s", i+1, len(files), filepath.Base(filePath))
 
-		go func(fp string) {
+		go func(fp string, idx int) {
 			defer wg.Done()
-			defer func() { <-sem }()
+			defer func() {
+				<-sem
+				s.debugf("[%d/%d] Released semaphore: %s", idx+1, len(files), filepath.Base(fp))
+			}()
 
 			fileName := filepath.Base(fp)
+			s.debugf("[%d/%d] Starting sync: %s", idx+1, len(files), fileName)
 
 			_, created, skipped, err := s.syncFileWithProgress(fp, databaseID, "", linkMap, progress)
 
 			if err != nil {
+				s.debugf("[%d/%d] Error syncing %s: %v", idx+1, len(files), fileName, err)
 				progress.PrintError(fileName, err)
 			} else if skipped {
+				s.debugf("[%d/%d] Skipped (unchanged): %s", idx+1, len(files), fileName)
 				progress.PrintCompleted(fileName, "unchanged")
 			} else if created {
+				s.debugf("[%d/%d] Created: %s", idx+1, len(files), fileName)
 				progress.PrintCompleted(fileName, "created")
 			} else {
+				s.debugf("[%d/%d] Updated: %s", idx+1, len(files), fileName)
 				progress.PrintCompleted(fileName, "updated")
 			}
-		}(filePath)
+		}(filePath, i)
 	}
 
+	s.debugf("Waiting for all goroutines to complete...")
 	wg.Wait()
+	s.debugf("All goroutines completed")
 }
 
 // syncFileWithProgress syncs a single file with progress callback support
 func (s *Syncer) syncFileWithProgress(filePath, databaseID, customIdentifier string, linkMap map[string]string, progress *ProgressManager) (string, bool, bool, error) {
+	fileName := filepath.Base(filePath)
+	s.debugf("  [%s] Reading file", fileName)
+
 	// Read the markdown file
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return "", false, false, fmt.Errorf("failed to read file: %w", err)
 	}
+	s.debugf("  [%s] Read %d bytes", fileName, len(content))
 
 	// Compute content hash
 	contentHash := notion.ComputeContentHash(content)
+	s.debugf("  [%s] Content hash: %s", fileName, contentHash[:8])
 
 	// Parse markdown to extract title and content
+	s.debugf("  [%s] Parsing markdown", fileName)
 	doc, err := markdown.Parse(content)
 	if err != nil {
 		return "", false, false, fmt.Errorf("failed to parse markdown: %w", err)
 	}
+	s.debugf("  [%s] Parsed: title=%q, blocks=%d", fileName, doc.Title, len(doc.Blocks))
 
 	// Resolve relative links if we have a link map
 	if linkMap != nil && len(linkMap) > 0 {
@@ -314,23 +360,29 @@ func (s *Syncer) syncFileWithProgress(filePath, databaseID, customIdentifier str
 	}
 
 	// Look up if an entry exists with this identifier
+	s.debugf("  [%s] Looking up existing entry in database", fileName)
 	pageID, exists, err := s.notionClient.FindEntryByFilename(databaseID, identifier)
 	if err != nil {
 		return "", false, false, fmt.Errorf("failed to lookup entry: %w", err)
 	}
+	s.debugf("  [%s] Entry exists: %v, pageID: %s", fileName, exists, pageID)
 
 	if exists {
 		// Check if content has changed (unless force is set)
 		if !s.config.Force {
+			s.debugf("  [%s] Checking content hash", fileName)
 			existingHash, err := s.notionClient.GetEntryContentHash(pageID)
 			if err == nil && existingHash == contentHash {
+				s.debugf("  [%s] Content unchanged, skipping", fileName)
 				// Content unchanged, skip update
 				return pageID, false, true, nil
 			}
+			s.debugf("  [%s] Content changed (old=%s, new=%s)", fileName, existingHash[:8], contentHash[:8])
+		} else {
+			s.debugf("  [%s] Force flag set, skipping hash check", fileName)
 		}
 
 		// Register file for progress tracking
-		fileName := filepath.Base(filePath)
 		var callback notion.ProgressCallback
 		if progress != nil {
 			progress.AddActiveFile(fileName, len(doc.Blocks))
@@ -338,6 +390,7 @@ func (s *Syncer) syncFileWithProgress(filePath, databaseID, customIdentifier str
 		}
 
 		// Update existing entry with progress
+		s.debugf("  [%s] Updating entry...", fileName)
 		err = s.notionClient.UpdateDatabaseEntryWithProgress(pageID, doc.Title, identifier, contentHash, doc.Blocks, callback)
 		if progress != nil {
 			progress.RemoveActiveFile(fileName)
@@ -345,17 +398,18 @@ func (s *Syncer) syncFileWithProgress(filePath, databaseID, customIdentifier str
 		if err != nil {
 			return "", false, false, fmt.Errorf("failed to update entry: %w", err)
 		}
+		s.debugf("  [%s] Update complete", fileName)
 		return pageID, false, false, nil
 	}
 
 	// Create new entry with progress
-	fileName := filepath.Base(filePath)
 	var callback notion.ProgressCallback
 	if progress != nil {
 		progress.AddActiveFile(fileName, len(doc.Blocks))
 		callback = progress.ProgressCallback(fileName)
 	}
 
+	s.debugf("  [%s] Creating new entry...", fileName)
 	pageID, err = s.notionClient.CreateDatabaseEntryWithProgress(databaseID, doc.Title, identifier, contentHash, doc.Blocks, callback)
 	if progress != nil {
 		progress.RemoveActiveFile(fileName)
@@ -363,6 +417,7 @@ func (s *Syncer) syncFileWithProgress(filePath, databaseID, customIdentifier str
 	if err != nil {
 		return "", false, false, fmt.Errorf("failed to create entry: %w", err)
 	}
+	s.debugf("  [%s] Create complete, pageID: %s", fileName, pageID)
 
 	return pageID, true, false, nil
 }
