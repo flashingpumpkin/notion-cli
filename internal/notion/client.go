@@ -646,6 +646,25 @@ func (c *Client) smartUpdateBlocksWithProgress(ctx context.Context, parentID not
 	return nil
 }
 
+// blockSupportsUpdate returns true if the block type can be updated in place
+func blockSupportsUpdate(block notionapi.Block) bool {
+	switch block.(type) {
+	case *notionapi.ParagraphBlock,
+		*notionapi.Heading1Block,
+		*notionapi.Heading2Block,
+		*notionapi.Heading3Block,
+		*notionapi.BulletedListItemBlock,
+		*notionapi.NumberedListItemBlock,
+		*notionapi.ToDoBlock,
+		*notionapi.QuoteBlock,
+		*notionapi.CodeBlock:
+		return true
+	default:
+		// Tables, images, dividers, etc. cannot be updated in place
+		return false
+	}
+}
+
 // blocksAreEqual compares two blocks for equality (same type and content)
 func blocksAreEqual(existing, new notionapi.Block) bool {
 	if existing.GetType() != new.GetType() {
@@ -819,8 +838,8 @@ func computeBlockDiff(existing []notionapi.Block, newBlocks []notionapi.Block) D
 
 		} else {
 			// Neither found in lookahead - direct replacement
-			if oldBlock.GetType() == newBlock.GetType() {
-				// Same type - update in place
+			if oldBlock.GetType() == newBlock.GetType() && blockSupportsUpdate(newBlock) {
+				// Same type and supports in-place update
 				result.Operations = append(result.Operations, Operation{
 					Type:     OpUpdate,
 					OldIndex: oldIdx,
@@ -833,7 +852,7 @@ func computeBlockDiff(existing []notionapi.Block, newBlocks []notionapi.Block) D
 				oldIdx++
 				newIdx++
 			} else {
-				// Different type - fall back to delete-remaining and append-remaining
+				// Different type or doesn't support updates - fall back to delete-remaining and append-remaining
 				for i := oldIdx; i < len(existing); i++ {
 					result.Operations = append(result.Operations, Operation{
 						Type:     OpDelete,
@@ -1216,20 +1235,31 @@ func (c *Client) CreateChildDatabase(parentPageID, title, identifier string) (st
 func (c *Client) FindChildDatabase(parentPageID, title string) (string, bool, error) {
 	ctx := context.Background()
 
-	// Get all child blocks
-	blocks, err := c.api.Block.GetChildren(ctx, notionapi.BlockID(parentPageID), nil)
-	if err != nil {
-		return "", false, fmt.Errorf("failed to get child blocks: %w", err)
-	}
+	var cursor notionapi.Cursor
+	for {
+		pagination := &notionapi.Pagination{}
+		if cursor != "" {
+			pagination.StartCursor = cursor
+		}
 
-	for _, block := range blocks.Results {
-		if block.GetType() == notionapi.BlockTypeChildDatabase {
-			// Get database details
-			dbBlock, ok := block.(*notionapi.ChildDatabaseBlock)
-			if ok && dbBlock.ChildDatabase.Title == title {
-				return string(block.GetID()), true, nil
+		blocks, err := c.api.Block.GetChildren(ctx, notionapi.BlockID(parentPageID), pagination)
+		if err != nil {
+			return "", false, fmt.Errorf("failed to get child blocks: %w", err)
+		}
+
+		for _, block := range blocks.Results {
+			if block.GetType() == notionapi.BlockTypeChildDatabase {
+				dbBlock, ok := block.(*notionapi.ChildDatabaseBlock)
+				if ok && dbBlock.ChildDatabase.Title == title {
+					return string(block.GetID()), true, nil
+				}
 			}
 		}
+
+		if !blocks.HasMore {
+			break
+		}
+		cursor = notionapi.Cursor(blocks.NextCursor)
 	}
 
 	return "", false, nil
