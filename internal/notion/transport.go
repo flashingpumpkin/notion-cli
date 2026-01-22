@@ -169,7 +169,7 @@ func (rt *ResilientTransport) RoundTrip(req *http.Request) (*http.Response, erro
 		// Check circuit breaker
 		if !rt.circuitBreaker.Allow() {
 			// Wait for recovery timeout before retrying
-			time.Sleep(rt.circuitBreaker.recoveryTimeout)
+			waitWithProgress(rt.circuitBreaker.recoveryTimeout, "Circuit breaker open, waiting for recovery,")
 			if !rt.circuitBreaker.Allow() {
 				return nil, fmt.Errorf("circuit breaker open - API unavailable")
 			}
@@ -218,8 +218,7 @@ func (rt *ResilientTransport) RoundTrip(req *http.Request) (*http.Response, erro
 			// Handle 429 rate limiting
 			if resp.StatusCode == 429 {
 				retryAfter := rt.parseRetryAfter(resp)
-				fmt.Printf("Rate limited by Notion API, waiting %v...\n", retryAfter)
-				time.Sleep(retryAfter)
+				waitWithProgress(retryAfter, "Rate limited by Notion API,")
 				continue
 			}
 
@@ -279,4 +278,31 @@ func (rt *ResilientTransport) parseRetryAfter(resp *http.Response) time.Duration
 	}
 
 	return 1 * time.Second
+}
+
+// waitWithProgress waits for the specified duration while showing a countdown
+func waitWithProgress(duration time.Duration, message string) {
+	if duration <= 0 {
+		return
+	}
+
+	endTime := time.Now().Add(duration)
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	// Print initial message with time remaining
+	remaining := time.Until(endTime).Round(time.Second)
+	fmt.Printf("\r%s %v remaining...  ", message, remaining)
+
+	for {
+		select {
+		case <-ticker.C:
+			remaining = time.Until(endTime).Round(time.Second)
+			if remaining <= 0 {
+				fmt.Printf("\r%s done.                    \n", message)
+				return
+			}
+			fmt.Printf("\r%s %v remaining...  ", message, remaining)
+		}
+	}
 }
