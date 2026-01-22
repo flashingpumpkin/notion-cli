@@ -48,7 +48,7 @@ type Syncer struct {
 
 // NewSyncer creates a new Syncer instance
 func NewSyncer(config Config) (*Syncer, error) {
-	client, err := notion.NewClient(config.NotionToken)
+	client, err := notion.NewClient(config.NotionToken, config.Debug)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create notion client: %w", err)
 	}

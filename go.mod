@@ -1,6 +1,6 @@
 module github.com/flashingpumpkin/notion-cli
 
-go 1.22
+go 1.24.0
 
 toolchain go1.25.6
 
@@ -16,4 +16,5 @@ require (
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/xrash/smetrics v0.0.0-20240521201337-686a1a2994c1 // indirect
 	golang.org/x/sys v0.6.0 // indirect
+	golang.org/x/time v0.14.0 // indirect
 )

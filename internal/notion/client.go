@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 
@@ -20,12 +21,21 @@ type Client struct {
 }
 
 // NewClient creates a new Notion client
-func NewClient(token string) (*Client, error) {
+func NewClient(token string, debug bool) (*Client, error) {
 	if token == "" {
 		return nil, fmt.Errorf("notion token is required")
 	}
 
-	client := notionapi.NewClient(notionapi.Token(token))
+	// Create resilient transport with rate limiting, circuit breaker, and retries
+	transport := NewResilientTransport(debug)
+	httpClient := &http.Client{
+		Transport: transport,
+	}
+
+	client := notionapi.NewClient(
+		notionapi.Token(token),
+		notionapi.WithHTTPClient(httpClient),
+	)
 	return &Client{
 		api:              client,
 		ensuredDatabases: make(map[string]bool),
