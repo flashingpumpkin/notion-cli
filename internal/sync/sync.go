@@ -576,62 +576,63 @@ func (s *Syncer) syncFile(filePath, databaseID, customIdentifier string, linkMap
 
 // CleanupOrphanedPages deletes Notion entries that don't have corresponding markdown files
 func (s *Syncer) CleanupOrphanedPages(paths []string) error {
-	// Build a set of all markdown files and directories
-	fileSet := make(map[string]bool)
-
 	for _, path := range paths {
 		info, err := os.Stat(path)
 		if err != nil {
 			continue
 		}
-
 		if info.IsDir() {
-			// Walk directory and collect all markdown files and directories
-			err := filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
-				if err != nil {
-					return nil // Skip errors
-				}
+			return s.cleanupDatabaseRecursive(s.config.RootPageID, path)
+		}
+	}
+	return nil
+}
 
-				if d.IsDir() {
-					// Add directory name
-					if p != path { // Skip the root path itself
-						fileSet[filepath.Base(p)] = true
-					}
-				} else if strings.HasSuffix(strings.ToLower(d.Name()), ".md") {
-					fileSet[d.Name()] = true
-				}
-
-				return nil
-			})
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to walk directory %s: %v\n", path, err)
-			}
-		} else {
-			// Add single file
-			fileSet[filepath.Base(path)] = true
+// cleanupDatabaseRecursive recursively cleans up orphaned entries from a database and its child databases
+func (s *Syncer) cleanupDatabaseRecursive(databaseID, dirPath string) error {
+	// Build set of direct children only (files and subdirs)
+	fileSet := make(map[string]bool)
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return fmt.Errorf("failed to read directory %s: %w", dirPath, err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			fileSet[entry.Name()] = true
+		} else if strings.HasSuffix(strings.ToLower(entry.Name()), ".md") {
+			fileSet[entry.Name()] = true
 		}
 	}
 
-	// Get all entries from the root database
-	entries, err := s.notionClient.GetDatabaseEntries(s.config.RootPageID)
+	// Get all entries from this database
+	dbEntries, err := s.notionClient.GetDatabaseEntries(databaseID)
 	if err != nil {
 		return fmt.Errorf("failed to get database entries: %w", err)
 	}
 
 	// Check each entry
-	for _, entry := range entries {
-		// Get the "Markdown File" property
-		if prop, ok := entry.Properties["Markdown File"]; ok {
-			if richTextProp, ok := prop.(*notionapi.RichTextProperty); ok {
-				if len(richTextProp.RichText) > 0 {
-					entryFilename := richTextProp.RichText[0].PlainText
-					// If the markdown file or directory doesn't exist, delete the entry
-					if !fileSet[entryFilename] {
-						fmt.Printf("⚠ Deleting orphaned entry '%s' (no markdown file or directory: %s)\n", getEntryTitle(entry), entryFilename)
-						err = s.notionClient.DeleteEntry(string(entry.ID))
-						if err != nil {
-							fmt.Fprintf(os.Stderr, "Warning: failed to delete entry %s: %v\n", entry.ID, err)
-						}
+	for _, entry := range dbEntries {
+		entryFilename := getEntryFilename(entry)
+		if entryFilename == "" {
+			continue
+		}
+
+		if !fileSet[entryFilename] {
+			// Orphaned - delete it
+			fmt.Printf("Deleting orphaned entry '%s' (no file: %s)\n", getEntryTitle(entry), entryFilename)
+			err = s.notionClient.DeleteEntry(string(entry.ID))
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to delete entry %s: %v\n", entry.ID, err)
+			}
+		} else {
+			// Check if this is a subdirectory - recurse into its child database
+			subdirPath := filepath.Join(dirPath, entryFilename)
+			info, err := os.Stat(subdirPath)
+			if err == nil && info.IsDir() {
+				childDBID, found, _ := s.notionClient.FindChildDatabase(string(entry.ID), entryFilename)
+				if found {
+					if err := s.cleanupDatabaseRecursive(childDBID, subdirPath); err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: failed to cleanup child database %s: %v\n", entryFilename, err)
 					}
 				}
 			}
@@ -639,6 +640,19 @@ func (s *Syncer) CleanupOrphanedPages(paths []string) error {
 	}
 
 	return nil
+}
+
+// getEntryFilename extracts the markdown filename from a database entry
+func getEntryFilename(entry notionapi.Page) string {
+	prop, ok := entry.Properties["Markdown File"]
+	if !ok {
+		return ""
+	}
+	richTextProp, ok := prop.(*notionapi.RichTextProperty)
+	if !ok || len(richTextProp.RichText) == 0 {
+		return ""
+	}
+	return richTextProp.RichText[0].PlainText
 }
 
 // getEntryTitle extracts the title from a database entry
